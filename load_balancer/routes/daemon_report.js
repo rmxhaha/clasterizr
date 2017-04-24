@@ -12,10 +12,10 @@ router.get('/:worker_id/', function(req, res, next) {
   else if( cpuload < 0 )
     cpuload = 0;
   else {
-    res.status(422).json({
+    res.json({
       'status' : 'fail',
       'message' : 'cpuload not given'
-    });
+    }, 422);
   }
 
   console.log( "Worker #" + worker_id + ": reporting CPU " + cpuload + "%" );
