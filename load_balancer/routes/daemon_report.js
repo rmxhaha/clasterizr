@@ -1,6 +1,6 @@
 let express = require('express');
 let router = express.Router();
-let config = require('../config.json');
+let config = require('../config.js');
 
 /* GET home page. */
 router.get('/:worker_id/', function(req, res, next) {

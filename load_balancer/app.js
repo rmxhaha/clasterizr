@@ -8,6 +8,7 @@ var bodyParser = require('body-parser');
 var index = require('./routes/index');
 var users = require('./routes/users');
 var daemon_report = require('./routes/daemon_report');
+var load_balancer = require('./routes/load_balancer');
 
 var app = express();
 
@@ -26,6 +27,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/', index);
 app.use('/users', users);
 app.use('/daemon', daemon_report);
+app.use('/load_balancer', load_balancer);
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
@@ -44,5 +46,7 @@ app.use(function(err, req, res, next) {
   res.status(err.status || 500);
   res.render('error');
 });
+
+app.set('port', process.env.PORT || 3000);
 
 module.exports = app;
