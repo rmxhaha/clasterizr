@@ -7,14 +7,16 @@ let myNode = new consensus.Node(config, process.env.NODEID)
 
 /* GET home page. */
 router.post('/receiveRequestVote/', function(req, res, next) {
-  requestVoteRPC = JSON.parse(req.body)
+  requestVoteRPC = req.body
   requestVoteRPC.__proto__ == consensus.RequestVoteRPC.prototype
 
-  myNode.receiveRequestVote( requestVoteRPC ).then( res.json );
+  myNode.receiveRequestVote( requestVoteRPC ).then( res.json ).catch(function(err){
+    console.log(err)
+  });
 })
 
 router.post('/receiveAppendLog/', function(req, res, next){
-  appendEntriesRPC = JSON.parse(req.body)
+  appendEntriesRPC = req.body
   appendEntriesRPC.__proto__ == consensus.AppendEntriesRPC.prototype
 
   myNode.receiveAppendLog( appendEntriesRPC ).then( res.json );
