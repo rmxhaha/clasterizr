@@ -181,6 +181,13 @@ class Node {
         return Promise.reject();
       }
 
+      if( res.term > node.state.currentTerm ){
+        this.state.currentTerm = res.term;
+        writeState();
+        return changePositionTo("follower");
+      }
+
+
       let res = JSON.parse( response.body );
       if( res.type == "negative" )
         return Promise.reject()
@@ -278,13 +285,15 @@ class Node {
 
   replyPositive(){
     return Promise.resolve({
-      type : 'positive'
+      type : 'positive',
+      term : this.state.currentTerm
     });
   }
 
   replyNegative(){
     return Promise.resolve({
-      type : 'negative'
+      type : 'negative',
+      term : this.state.currentTerm
     })
   }
 
