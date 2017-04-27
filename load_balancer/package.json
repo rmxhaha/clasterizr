@@ -3,7 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "start": "nodemon ./bin/www"
+    "start": "nodemon ./bin/www",
+    "start0" : "NODEID=0 PORT=47001 node bin/www",
+    "start1" : "NODEID=1 PORT=47002 node bin/www",
+    "start2" : "NODEID=2 PORT=47003 node bin/www"
   },
   "dependencies": {
     "bluebird": "^3.5.0",
