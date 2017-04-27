@@ -32,4 +32,38 @@ router.post('/receiveAppendLog/', function(req, res, next){
   });
 })
 
+router.get('/receiveNewLog/:worker_id/', function(req, res, next) {
+  const workerId = req.params.workerId;
+
+  let cpuload = parseInt(req.query.cpuload);
+  let workerAddr = req.query.address;
+
+  console.log( cpuload )
+
+  if( cpuload > 100 )
+    cpuload = 100;
+  else if( cpuload < 0 )
+    cpuload = 0;
+
+
+  let logData = {}
+  logData["worker"+workerId] = { cpuload, workerAddr }
+
+
+  myNode.receiveNewLog( logData ).then(()=>{
+    console.log( "Worker #" + workerId + ": reporting CPU " + cpuload + "%" );
+    res.json({
+      'status' : 'ok',
+      'message' : 'acknowledged by leader'
+    });
+  }).catch((err)=>{
+    res.json({
+      'status' : 'fail',
+      'message' : err.message
+    });
+  })
+
+
+});
+
 module.exports = router;

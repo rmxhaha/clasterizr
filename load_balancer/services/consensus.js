@@ -64,8 +64,6 @@ class Node {
   triggerTimeout(){
     console.log("Node timedout")
     if( this.position == "follower" ){
-      this.state.currentTerm ++ ;
-      this.writeState();
       this.changePositionTo("candidate");
     }
     else if( this.position == "candidate" ){
@@ -149,13 +147,8 @@ class Node {
 
       if( newPos == "candidate" ){
         this.state.currentTerm ++;
-
-
         // broadcast asking for an election
-
         this.broadcastRequestVote()
-
-
       }
 
       this.position = newPos;
@@ -278,6 +271,20 @@ class Node {
     }
   }
 
+  // comming from client
+  receiveNewLog( data ){
+    if( this.position == "leader" ){
+      const maxLogIdx = this.state.logs.length - 1
+      const log = new Log( maxLogIdx + 1, this.state.currentTerm, data)
+      this.state.logs.push( log )
+      this.writeState()
+      return Promise.resolve()
+    }
+    else {
+      return Promise.reject(new Error("This node is not the leader this node is a " + this.position))
+    }
+  }
+
   receiveAppendLog( appendEntriesRPC ){
     try {
       this.resetTimer();
@@ -295,7 +302,7 @@ class Node {
 
       // -- stale leader
       if( appendEntriesRPC.term < this.state.currentTerm ){
-        return replyNegative();
+        return this.replyNegative();
       }
 
       // -- log inconsistency
@@ -303,11 +310,11 @@ class Node {
 
       // leader send beyond current log
       else if( appendEntriesRPC.prevLogIndex > maxLogIndexReceived ){
-        return replyNegative();
+        return this.replyNegative();
       }
       // leader send inconsistent log
       else if( appendEntriesRPC.prevLogIndex >= 1 && this.state.logs[appendEntriesRPC.prevLogIndex].term != appendEntriesRPC.prevLogTerm ){
-        return replyNegative();
+        return this.replyNegative();
       }
       // -- normal case
       else {
@@ -422,10 +429,11 @@ class RequestVoteRPC {
 }
 
 class Log {
-  constructor(idx, term, workerId, cpuload){
+  constructor(idx, term, data){
     this.logId = idx
     this.term = term
-    this.data = { workerId, cpuload }
+    this.data = data
+    // this.data = { workerId, cpuload }
   }
 }
 /*
