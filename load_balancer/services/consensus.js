@@ -197,10 +197,7 @@ class Node {
       body : appendEntriesRPC,
       json : true
     }).then(function(response){
-      if( response.statusCode != 200 )
-        return Promise.reject(new Error("Status Code "+ response.statusCode));
-
-      let res = JSON.parse( response.body );
+      let res = response;
 
       if( res.result == "negative" ){
         node.nextIndex[to] --; // move back and try again
@@ -276,43 +273,50 @@ class Node {
       }
     }
     catch(err){
+      console.log( err.message )
       return Promise.reject(err);
     }
   }
 
   receiveAppendLog( appendEntriesRPC ){
-    this.resetTimer();
+    try {
+      this.resetTimer();
 
-    appendEntriesRPC.__proto__ = appendEntriesRPC.prototype;
-    let maxLogIndexReceived = this.state.logs.length-1;
+      appendEntriesRPC.__proto__ = appendEntriesRPC.prototype;
+      let maxLogIndexReceived = this.state.logs.length-1;
 
-    // new leader appear for some reason
-    if( appendEntriesRPC.term > this.state.currentTerm ){
-      this.state.votedFor = appendEntriesRPC.leaderId;
-      this.state.currentTerm = appendEntriesRPC.term;
-      writeState();
-      this.changePositionTo("follower");
+      // new leader appear for some reason
+      if( appendEntriesRPC.term > this.state.currentTerm ){
+        this.state.votedFor = appendEntriesRPC.leaderId;
+        this.state.currentTerm = appendEntriesRPC.term;
+        this.writeState();
+        this.changePositionTo("follower");
+      }
+
+      // -- stale leader
+      if( appendEntriesRPC.term < this.state.currentTerm ){
+        return replyNegative();
+      }
+
+      // -- log inconsistency
+
+
+      // leader send beyond current log
+      else if( appendEntriesRPC.prevLogIndex > maxLogIndexReceived ){
+        return replyNegative();
+      }
+      // leader send inconsistent log
+      else if( appendEntriesRPC.prevLogIndex >= 1 && this.state.logs[appendEntriesRPC.prevLogIndex].term != appendEntriesRPC.prevLogTerm ){
+        return replyNegative();
+      }
+      // -- normal case
+      else {
+        return this.processEntries( appendEntriesRPC ).then( this.replyPositive.bind(this) );
+      }
     }
-
-    // -- stale leader
-    if( appendEntriesRPC.term < this.state.currentTerm ){
-      return replyNegative();
-    }
-
-    // -- log inconsistency
-
-
-    // leader send beyond current log
-    else if( appendEntriesRPC.prevLogIndex > maxLogIndexReceived ){
-      return replyNegative();
-    }
-    // leader send inconsistent log
-    else if( this.state.logs[appendEntriesRPC.prevLogIndex].term != appendEntriesRPC.prevLogTerm ){
-      return replyNegative();
-    }
-    // -- normal case
-    else {
-      return this.processEntries( appendEntriesRPC ).then( replyPositive );
+    catch(err){
+      console.log(err)
+      return Promise.reject()
     }
   }
 
@@ -333,7 +337,7 @@ class Node {
     this.state.commitedIndex = Limit;
 
     // write to non volatile media
-    writeState(); // synchronous
+    this.writeState(); // synchronous
 
     return Promise.resolve();
   }

@@ -14,8 +14,7 @@ router.post('/receiveRequestVote/', function(req, res, next) {
 
   myNode.receiveRequestVote( requestVoteRPC ).then(function(result){
     res.json(result);
-    console.log(result);
-    return Promise.resolve();
+    console.log("My Answer to vote :" + JSON.stringify(result) );
   }).catch(function(err){
     console.log(err)
   });
@@ -25,7 +24,12 @@ router.post('/receiveAppendLog/', function(req, res, next){
   appendEntriesRPC = req.body
   appendEntriesRPC.__proto__ == consensus.AppendEntriesRPC.prototype
 
-  myNode.receiveAppendLog( appendEntriesRPC ).then( res.json );
+  myNode.receiveAppendLog( appendEntriesRPC ).then(function(result){
+    res.json(result);
+    console.log("My Answer to vote :" + JSON.stringify(result) );
+  }).catch(function(err){
+    console.log(err)
+  });
 })
 
 module.exports = router;
