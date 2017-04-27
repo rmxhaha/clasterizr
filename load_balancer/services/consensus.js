@@ -1,3 +1,5 @@
+"use strict";
+
 let fs = require('fs');
 let Promise = require('bluebird');
 var rp = require('request-promise');
@@ -22,74 +24,146 @@ class Node {
 
     // volatile state
     this.nodeId = nodeId
-    this.position = "follower"
     this.leaderAddress = this.config.node_addresses[nodeId]
 
     // volatile state for candidate only
-    this.approvalCount = 1
+    this.candidateRequestVotes = []
 
     // volatile state for leader only
     this.nextIndex = []
     this.matchIndex = []
     this.childTimer = []
 
-    this.resetTimer();
+    this.changePositionTo("follower")
   }
 
   // -- timeout related
   getRandomFollowerTimeout(){
-    return Math.floor(this.config.load_balancer_timeout_max - this.config.load_balancer_timeout_min) * Math.random() + this.config.load_balancer_timeout_min;
+    return Math.floor( (this.config.load_balancer_timeout_max - this.config.load_balancer_timeout_min) * Math.random() + this.config.load_balancer_timeout_min );
   }
 
   getHeartbeatTimeout(){
     return this.config.load_balancer_timeout_min/2;
   }
 
+  getElectionTimeout(){
+    return this.config.load_balancer_timeout_max * 10;
+  }
+
   resetTimer(){
     clearTimeout(this.timer);
-    let timeout = this.getRandomFollowerTimeout();
+    let timeout = 0
+    if( this.position == "follower" )
+      timeout = this.getRandomFollowerTimeout()
+    else
+      timeout = this.getElectionTimeout()
+
     this.timer = setTimeout(this.triggerTimeout.bind(this), timeout );
   }
 
   triggerTimeout(){
     console.log("Node timedout")
     if( this.position == "follower" ){
+      this.state.currentTerm ++ ;
+      this.writeState();
       this.changePositionTo("candidate");
     }
-    else if( this.state == "candidate" ){
+    else if( this.position == "candidate" ){
       this.changePositionTo("candidate");
+    }
+
+    this.resetTimer();
+  }
+
+  cancelRequestVoteBroadcast(){
+    for( let i = 0; i < this.candidateRequestVotes.length; ++ i )
+      this.candidateRequestVotes[i].cancel()
+
+    this.candidateRequestVotes.length = 0
+  }
+
+  broadcastRequestVote(){
+    let positiveCount = 1
+    let negativeCount = 0
+    const majority = Math.ceil( this.config.node_addresses.length/2) // -1 for counting himself
+    const node = this
+
+
+    for( let i = 0; i < this.config.node_addresses.length; ++ i ){
+      if( i == this.nodeId ) continue;
+      this.candidateRequestVotes.push(
+        this.sendRequestVote(i).then(()=>{
+          positiveCount++
+          console.log( "Pos" + positiveCount )
+          if( positiveCount >= majority ){
+            this.cancelRequestVoteBroadcast()
+            this.changePositionTo("leader")
+          }
+        }).catch(()=>{
+          negativeCount++
+          console.log( "Neg " + negativeCount )
+          if( negativeCount >= majority )
+            this.cancelRequestVoteBroadcast()
+        })
+      );
     }
   }
 
   changePositionTo(newPos){
-    if( this.position == "follower" && newPos == "leader" )
-      throw new Error("A bug is detected");
-    if( this.position == "leader" && newPos == "candidate" )
-      throw new Error("A bug is detected");
+    try {
+      if( this.position == "follower" && newPos == "leader" )
+        throw new Error("A bug is detected");
+      if( this.position == "leader" && newPos == "candidate" )
+        throw new Error("A bug is detected");
 
-    console.log("Node change position "+newPos)
+      console.log("Node change position from " + this.position +  " to " +newPos);
+      this.resetTimer();
 
-    if( this.position == "leader" ){
-      // pasti jd follower lagi
-      this.resetTimer(); // re init timeout
-    }
-
-    if( this.position == "candidate" && newPos == "leader" ){
-      // disable timer
-      clearTimeout(this.timer)
-
-      // init leader's variable
-      this.nextIndex = []
-      this.matchIndex = []
-      let lastLogIndex = node.state.logs.length-1
-      for( let i = 0; i < this.config.node_addresses.length; ++ i ){
-        if( i == this.nodeId ) continue;
-
-        this.nextIndex[i] = lastLogIndex
-        this.matchIndex[i] = 0
-        this.childTimer[i] = setTimeout( sendAppendLog.bind(this, i), this.getHeartbeatTimeout() * 6 );
+      if( newPos == "follower" ){
+        // pasti jd follower lagi
+        // re init timeout
+        for( let i = 0; i < this.childTimer.length; ++ i ){
+          clearTimeout( this.childTimer[i] )
+        }
       }
+
+      if( this.position == "candidate" && newPos == "leader" ){
+        // disable timer
+        clearTimeout(this.timer)
+
+        // init leader's variable
+        this.nextIndex = []
+        this.matchIndex = []
+        let lastLogIndex = this.state.logs.length-1
+        for( let i = 0; i < this.config.node_addresses.length; ++ i ){
+          if( i == this.nodeId ) continue;
+
+          this.nextIndex[i] = lastLogIndex
+          this.matchIndex[i] = 0
+          this.childTimer[i] = setTimeout( this.sendAppendLog.bind(this, i), this.getHeartbeatTimeout() * 6 );
+        }
+      }
+
+      if( this.position == "candidate" )
+        this.cancelRequestVoteBroadcast()
+
+      if( newPos == "candidate" ){
+        this.state.currentTerm ++;
+
+
+        // broadcast asking for an election
+
+        this.broadcastRequestVote()
+
+
+      }
+
+      this.position = newPos;
     }
+    catch(err){
+      console.log(err)
+    }
+  }
 
     // if candidate - candidate an election have failed
     // - split vote happened or
@@ -97,28 +171,6 @@ class Node {
     // - network partition happened
     // re elect and re broadcast
 
-    if( newPos == "candidate" ){
-      this.state.currentTerm ++;
-
-      // broadcast asking for an election
-      let arr = []
-      for( let i = 0; i < this.config.node_addresses.length; ++ i ){
-        if( i == this.nodeId ) continue;
-        arr[i] = this.sendRequestVote( i );
-      }
-
-      // majority ok
-      let majority = Math.ceil( this.config.node_addresses.length/2)
-      let node = this
-      Promise.some(arr, majority).then(function(){
-        node.changePositionTo("leader")
-      }).catch(function(){
-        setTimeout(node.changePositionTo.bind(node,"candidate"), node.getHeartbeatTimeout())
-      })
-    }
-
-    this.position = newPos;
-  }
 
   // -- timeout related ends
 
@@ -155,15 +207,16 @@ class Node {
       }
       else if( res.result == "positive" ){
         if( appendEntriesRPC.entry != null ){ // sending something
-          node.matchIndex[to] = appendEntriesRPC.prevLogIndex + 1;
-          node.nextIndex[to] = appendEntriesRPC.prevLogIndex + 2;
+          node.matchIndex[to] = Math.max( node.matchIndex[to], appendEntriesRPC.prevLogIndex + 1 );
+          node.nextIndex[to] = Math.max( node.nextIndex[to], appendEntriesRPC.prevLogIndex + 2 );
           node.updateCommitIndex();
         }
       }
     }).catch(function(err){
-      console.log(err);
+      if(! err  )
+        console.log(err);
     }).finally(function(){
-      node.childTimer[to] = setTimeout( sendAppendLog.bind(node, i), node.getHeartbeatTimeout() );
+      node.childTimer[to] = setTimeout( node.sendAppendLog.bind(node, to), node.getHeartbeatTimeout() );
     });
   }
 
@@ -177,51 +230,53 @@ class Node {
       body : requestVoteRPC,
       json : true
     }).then(function(response){
-      if( response.statusCode != 200 ){
-        return Promise.reject();
+      if( response.term > node.state.currentTerm ){
+        this.state.currentTerm = response.term;
+        this.writeState();
+        this.changePositionTo("follower");
+        return ;
       }
 
-      if( res.term > node.state.currentTerm ){
-        this.state.currentTerm = res.term;
-        writeState();
-        return changePositionTo("follower");
-      }
-
-
-      let res = JSON.parse( response.body );
-      if( res.type == "negative" )
+      if( response.type == "negative" )
         return Promise.reject()
-
       return Promise.resolve()
+    }).catch(function(err){
+      console.log(err.message)
+      return Promise.reject();
     })
   }
 
   receiveRequestVote( requestVoteRPC ){
     this.resetTimer();
 
-    // kalau higher pasti itu aneh
-    if( this.state.currentTerm > requestVoteRPC.term ){
-      return replyNegative();
-    }
-    else if( this.state.currentTerm == requestVoteRPC.term ){
-      if( this.state.votedFor == requestVoteRPC.candidateId )
-        // candidate request vote 2x perhaps it doesn't
-        return replyPositive();
-      else
-        // 2 candidate timeout bareng jd udah vote intinya
-        return replyNegative();
-    }
-    else { // currentTerm < request.term
-      let maxLogIndexReceived = this.state.logs.length-1;
+    try {
+      // kalau higher pasti itu aneh
+      if( this.state.currentTerm > requestVoteRPC.term ){
+        return this.replyNegative();
+      }
+      else if( this.state.currentTerm == requestVoteRPC.term ){
+        if( this.state.votedFor == requestVoteRPC.candidateId )
+          // candidate request vote 2x perhaps it doesn't
+          return this.replyPositive();
+        else
+          // 2 candidate timeout bareng jd udah vote intinya
+          return this.replyNegative();
+      }
+      else { // currentTerm < request.term
+        let maxLogIndexReceived = this.state.logs.length-1;
 
-      // This node have more log than you, so you can't be leader
-      if( maxLogIndexReceived > requestVoteRPC.lastLogIndex )
-        return replyNegative();
+        // This node have more log than you, so you can't be leader
+        if( maxLogIndexReceived > requestVoteRPC.lastLogIndex )
+          return this.replyNegative();
 
-      this.state.votedFor = requestVoteRPC.candidateId
-      this.state.currentTerm = requestVoteRPC.term
-      this.changePositionTo("follower");
-      return replyPositive();
+        this.state.votedFor = requestVoteRPC.candidateId
+        this.state.currentTerm = requestVoteRPC.term
+        this.changePositionTo("follower");
+        return this.replyPositive();
+      }
+    }
+    catch(err){
+      return Promise.reject(err);
     }
   }
 
@@ -335,16 +390,17 @@ class Node {
 class AppendEntriesRPC {
   constructor(leaderNode, targetIdx){
     let node = leaderNode
-    let maxLogIndex = leader_node.state.logs.length-1
+    let maxLogIndex = node.state.logs.length-1
     this.term = node.state.currentTerm
     this.leaderId = node.nodeId
-    this.prevLogIndex = leader_node.nextIndex[targetIdx]-1
-    this.prevLogTerm = leader_node.state.logs[this.prevLogIndex].term
+    this.prevLogIndex = node.nextIndex[targetIdx]-1
+    if( this.prevLogIndex >= 0 )
+      this.prevLogTerm = node.state.logs[this.prevLogIndex].term
     if( this.prevLogIndex + 1 > maxLogIndex ) // heartbeat
       this.entry = null;
     else
-      this.entry = leader_node.state.logs[this.prevLogIndex+1];
-    this.commitedIndex = leader_node.commitedIndex;
+      this.entry = node.state.logs[this.prevLogIndex+1];
+    this.commitedIndex = node.commitedIndex;
   }
 }
 

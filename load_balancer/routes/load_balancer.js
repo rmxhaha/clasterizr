@@ -3,14 +3,20 @@ let router = express.Router()
 let config = require('../config.js')
 let consensus = require('../services/consensus')
 
-let myNode = new consensus.Node(config, process.env.NODEID)
+let myNode = new consensus.Node(config, config.nodeId)
 
 /* GET home page. */
 router.post('/receiveRequestVote/', function(req, res, next) {
   requestVoteRPC = req.body
   requestVoteRPC.__proto__ == consensus.RequestVoteRPC.prototype
 
-  myNode.receiveRequestVote( requestVoteRPC ).then( res.json ).catch(function(err){
+  console.log( requestVoteRPC );
+
+  myNode.receiveRequestVote( requestVoteRPC ).then(function(result){
+    res.json(result);
+    console.log(result);
+    return Promise.resolve();
+  }).catch(function(err){
     console.log(err)
   });
 })
