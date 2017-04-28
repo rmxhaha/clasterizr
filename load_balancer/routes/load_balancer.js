@@ -62,11 +62,13 @@ router.get('/receiveNewLog/:workerId/', function(req, res, next) {
   }).catch((err)=>{
     res.json({
       'status' : 'fail',
-      'message' : err.message
+      'message' : err.message,
+      'leader_address' : config.node_addresses[myNode.state.votedFor]
     });
   })
-
-
 });
+
+router.get('/receiveNewLog/:workerId/', function(req, res, next) {
+})
 
 module.exports = router;
