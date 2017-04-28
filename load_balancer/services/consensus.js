@@ -22,6 +22,7 @@ class Node {
 
     // non volatile only
     this.state = this.readState()
+    this.writeState() // in case first time
 
     // volatile state
     this.nodeId = nodeId
@@ -145,9 +146,13 @@ class Node {
         this.matchIndex = []
         let lastLogIndex = this.state.logs.length-1
         for( let i = 0; i < this.config.node_addresses.length; ++ i ){
-          if( i == this.nodeId ) continue;
+          if( i == this.nodeId ){
+            this.nextIndex[i] = lastLogIndex + 1
+            this.matchIndex[i] = lastLogIndex
+            continue;
+          }
 
-          this.nextIndex[i] = lastLogIndex
+          this.nextIndex[i] = lastLogIndex + 1
           this.matchIndex[i] = 0
           this.childTimer[i] = setTimeout( this.sendAppendLog.bind(this, i), this.getHeartbeatTimeout());
         }
@@ -186,10 +191,20 @@ class Node {
     let cidx = this.state.commitedIndex
     for(;;){
       let res = this.matchIndex.filter( (i) => i > cidx );
+      // + 1 because leader is counted too
       if( res.length < majority )
         break;
-      this.state.commitedIndex = cidx = Math.min.apply(null, res)
+      cidx = Math.min.apply(null, res)
     }
+
+    let currentData = this.state.currentData
+    for( let i = this.state.commitedIndex + 1; i <= cidx; ++ i ){
+      currentData = Object.assign( currentData, this.state.logs[i].data );
+    }
+
+    this.state.commitedIndex = cidx
+    this.state.currentData = currentData
+    this.writeState()
   }
 
   sendAppendLog( to ){
@@ -219,6 +234,14 @@ class Node {
           node.nextIndex[to] = appendEntriesRPC.prevLogIndex + 2;
           debug.log("Follower #"+to+" success append for " + appendEntriesRPC.prevLogIndex+1)
           node.updateCommitIndex();
+        }
+        else {
+          if(
+            node.nextIndex[to] != appendEntriesRPC.prevLogIndex + 1 ||
+            node.matchIndex[to] != appendEntriesRPC.prevLogIndex
+          ){
+            node.updateCommitIndex()
+          }
         }
       }
     }).catch(function(err){
@@ -302,6 +325,9 @@ class Node {
       const log = new Log( maxLogIdx + 1, this.state.currentTerm, data)
       this.state.logs.push( log )
       this.writeState()
+      this.nextIndex[this.nodeId] = maxLogIdx + 1
+      this.matchIndex[this.nodeId] = maxLogIdx + 2
+
       return Promise.resolve()
     }
     else {
@@ -365,6 +391,8 @@ class Node {
       currentData = Object.assign( currentData, this.state.logs[i].data );
     }
 
+    this.state.currentData = currentData
+
     this.state.commitedIndex = Limit;
 
     // write to non volatile media
@@ -396,15 +424,16 @@ class Node {
   writeState(){
     const fileloc = this.config.storage_location
     const filelocWrite = fileloc + ".tmp"
-    if( fs.existsSync(filelocWrite) )
+    if( fs.existsSync(filelocWrite) ){
       fs.unlinkSync(filelocWrite)
+    }
 
     fs.writeFileSync( filelocWrite, JSON.stringify(this.state), 'utf8');
 
-    if( fs.existsSync(fileloc) ){
+    if( fs.existsSync(fileloc) )
       fs.unlinkSync(fileloc)
-      fs.renameSync(filelocWrite, fileloc)
-    }
+
+    fs.renameSync(filelocWrite, fileloc)
   }
 
   readState(){
