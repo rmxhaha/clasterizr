@@ -39,11 +39,13 @@ class Node {
 
   // -- timeout related
   getRandomFollowerTimeout(){
-    return Math.floor( (this.config.load_balancer_timeout_max - this.config.load_balancer_timeout_min) * Math.random() + this.config.load_balancer_timeout_min );
+    let max = this.config.load_balancer_timeout_max
+    let min = this.config.load_balancer_timeout_min
+    return Math.floor( (max-min) * Math.random() + min );
   }
 
   getHeartbeatTimeout(){
-    return this.config.load_balancer_timeout_min/2;
+    return this.config.load_balancer_timeout_min ;
   }
 
   getElectionTimeout(){
@@ -53,16 +55,23 @@ class Node {
   resetTimer(){
     clearTimeout(this.timer);
     let timeout = 0
-    if( this.position == "follower" )
+    if( this.position == "follower" ){
       timeout = this.getRandomFollowerTimeout()
-    else
+      console.log("Node Timeout reset to " + timeout)
+      this.timer = setTimeout(this.triggerTimeout.bind(this), timeout );
+    }
+    else if( this.position == "candidate" ){
       timeout = this.getElectionTimeout()
+      console.log("Node Timeout reset to " + timeout)
+      this.timer = setTimeout(this.triggerTimeout.bind(this), timeout );
+    }
+    else {
+      this.timer = setTimeout( this.resetTimer.bind(this), this.getRandomFollowerTimeout())
+    }
 
-    this.timer = setTimeout(this.triggerTimeout.bind(this), timeout );
   }
 
   triggerTimeout(){
-    console.log("Node timedout")
     if( this.position == "follower" ){
       this.changePositionTo("candidate");
     }
@@ -138,7 +147,7 @@ class Node {
 
           this.nextIndex[i] = lastLogIndex
           this.matchIndex[i] = 0
-          this.childTimer[i] = setTimeout( this.sendAppendLog.bind(this, i), this.getHeartbeatTimeout() * 6 );
+          this.childTimer[i] = setTimeout( this.sendAppendLog.bind(this, i), this.getHeartbeatTimeout());
         }
       }
 
@@ -192,13 +201,16 @@ class Node {
     }).then(function(response){
       let res = response;
 
-      if( res.result == "negative" ){
+      console.log( appendEntriesRPC.entry)
+      console.log(res)
+      if( res.type == "negative" ){
         node.nextIndex[to] --; // move back and try again
       }
-      else if( res.result == "positive" ){
+      else if( res.type == "positive" ){
         if( appendEntriesRPC.entry != null ){ // sending something
-          node.matchIndex[to] = Math.max( node.matchIndex[to], appendEntriesRPC.prevLogIndex + 1 );
-          node.nextIndex[to] = Math.max( node.nextIndex[to], appendEntriesRPC.prevLogIndex + 2 );
+          node.matchIndex[to] = appendEntriesRPC.prevLogIndex + 1;
+          node.nextIndex[to] = appendEntriesRPC.prevLogIndex + 2;
+          console.log("Follower #"+to+" success append for " + appendEntriesRPC.prevLogIndex+1)
           node.updateCommitIndex();
         }
       }
@@ -242,22 +254,22 @@ class Node {
     try {
       // kalau higher pasti itu aneh
       if( this.state.currentTerm > requestVoteRPC.term ){
-        return this.replyNegative();
+        return this.replyNegative("candidate term is lower");
       }
       else if( this.state.currentTerm == requestVoteRPC.term ){
         if( this.state.votedFor == requestVoteRPC.candidateId )
           // candidate request vote 2x perhaps it doesn't
-          return this.replyPositive();
+          return this.replyPositive("candidate resend requestVote");
         else
           // 2 candidate timeout bareng jd udah vote intinya
-          return this.replyNegative();
+          return this.replyNegative("already voted for this term");
       }
       else { // currentTerm < request.term
         let maxLogIndexReceived = this.state.logs.length-1;
 
         // This node have more log than you, so you can't be leader
         if( maxLogIndexReceived > requestVoteRPC.lastLogIndex )
-          return this.replyNegative();
+          return this.replyNegative("candidate log is not at least update with this node log");
 
         this.state.votedFor = requestVoteRPC.candidateId
         this.state.currentTerm = requestVoteRPC.term
@@ -275,6 +287,7 @@ class Node {
   receiveNewLog( data ){
     if( this.position == "leader" ){
       const maxLogIdx = this.state.logs.length - 1
+      if( maxLogIdx == -1 ) maxLogIdx = 0
       const log = new Log( maxLogIdx + 1, this.state.currentTerm, data)
       this.state.logs.push( log )
       this.writeState()
@@ -302,7 +315,7 @@ class Node {
 
       // -- stale leader
       if( appendEntriesRPC.term < this.state.currentTerm ){
-        return this.replyNegative();
+        return this.replyNegative("stale leader sending appendEntries");
       }
 
       // -- log inconsistency
@@ -310,11 +323,11 @@ class Node {
 
       // leader send beyond current log
       else if( appendEntriesRPC.prevLogIndex > maxLogIndexReceived ){
-        return this.replyNegative();
+        return this.replyNegative("leader sending log too much beyond this node log");
       }
       // leader send inconsistent log
       else if( appendEntriesRPC.prevLogIndex >= 1 && this.state.logs[appendEntriesRPC.prevLogIndex].term != appendEntriesRPC.prevLogTerm ){
-        return this.replyNegative();
+        return this.replyNegative("log inconsistency");
       }
       // -- normal case
       else {
@@ -323,14 +336,14 @@ class Node {
     }
     catch(err){
       console.log(err)
-      return Promise.reject()
+      return this.replyNegative(err.message)
     }
   }
 
   processEntries( appendEntriesRPC ){
     // append entry if not null
     if( appendEntriesRPC.entry != null )
-      this.state.logs.push( appendEntriesRPC.entry );
+      this.state.logs[appendEntriesRPC.entry.logId] = appendEntriesRPC.entry;
 
     // commit if not commited
     let currentData = this.state.currentData;
@@ -338,7 +351,7 @@ class Node {
 
     // applying commited log to state machine
     for( let i = this.state.commitedIndex + 1; i <= Limit; ++ i ){
-      currentData = Object.assign( currentData, this.logs[i].data );
+      currentData = Object.assign( currentData, this.state.logs[i].data );
     }
 
     this.state.commitedIndex = Limit;
@@ -349,17 +362,23 @@ class Node {
     return Promise.resolve();
   }
 
-  replyPositive(){
+  getMaxLogIndex(){
+    return this.states.length-1
+  }
+
+  replyPositive(message){
     return Promise.resolve({
       type : 'positive',
-      term : this.state.currentTerm
+      term : this.state.currentTerm,
+      message
     });
   }
 
-  replyNegative(){
+  replyNegative(message){
     return Promise.resolve({
       type : 'negative',
-      term : this.state.currentTerm
+      term : this.state.currentTerm,
+      message
     })
   }
 
@@ -374,7 +393,7 @@ class Node {
     const fileloc = this.config.storage_location;
     const __default = {
       currentTerm : 1,
-      logs : [], // starts with index 1
+      logs : [{ logId : 0, data : {}, term : 0}], // starts with index 1
       commitedIndex : 0,
       lastApplied : 0,
       votedFor : null,
@@ -411,7 +430,7 @@ class AppendEntriesRPC {
       this.entry = null;
     else
       this.entry = node.state.logs[this.prevLogIndex+1];
-    this.commitedIndex = node.commitedIndex;
+    this.commitedIndex = node.state.commitedIndex;
   }
 }
 

@@ -24,9 +24,11 @@ router.post('/receiveAppendLog/', function(req, res, next){
   appendEntriesRPC = req.body
   appendEntriesRPC.__proto__ == consensus.AppendEntriesRPC.prototype
 
+  console.log( appendEntriesRPC )
+
   myNode.receiveAppendLog( appendEntriesRPC ).then(function(result){
     res.json(result);
-    console.log("My Answer to vote :" + JSON.stringify(result) );
+    console.log("My Answer to append :" + JSON.stringify(result) );
   }).catch(function(err){
     console.log(err)
   });
