@@ -3,6 +3,7 @@ let router = express.Router()
 let config = require('../config.js')
 let consensus = require('../services/consensus')
 let debug = require('../services/debug')
+let rp = require('request-promise');
 
 let myNode = new consensus.Node(config, config.nodeId)
 
@@ -87,6 +88,27 @@ router.get('/getLeaderData/', function(req, res, next) {
 })
 router.get('/getAllState/', function(req, res, next) {
   return res.json(myNode.state)
+})
+
+router.get('/getPrime/:Number', function(req,res,next){
+  let data = myNode.state.currentData
+  let bestAddr = null
+  let lowestCpuload = 101
+
+  for( let i in data ){
+    console.log(data[i].cpuload)
+    if( data[i].cpuload < lowestCpuload ){
+      lowestCpuload = data[i].cpuload
+      bestAddr = data[i].workerAddr
+    }
+  }
+
+  if( bestAddr == null )
+    return res.send('-1')
+  else
+    rp(bestAddr+"/"+req.params.Number).then(function(response){
+      res.send(response)
+    })
 })
 
 
