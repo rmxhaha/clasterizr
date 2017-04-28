@@ -2,7 +2,8 @@
 
 let fs = require('fs');
 let Promise = require('bluebird');
-var rp = require('request-promise');
+let rp = require('request-promise');
+let debug = require('./debug')
 
 class StateMachine {
   constructor(){
@@ -16,7 +17,7 @@ class StateMachine {
 
 class Node {
   constructor(config, nodeId){
-    console.log("Node with "+nodeId +" constructed")
+    debug.log("Node with "+nodeId +" constructed")
     this.config = config
 
     // non volatile only
@@ -46,7 +47,7 @@ class Node {
   }
 
   getHeartbeatTimeout(){
-    return this.config.load_balancer_timeout_min ;
+    return this.config.load_balancer_timeout_min/2;
   }
 
   getElectionTimeout(){
@@ -58,12 +59,12 @@ class Node {
     let timeout = 0
     if( this.position == "follower" ){
       timeout = this.getRandomFollowerTimeout()
-      console.log("Node Timeout reset to " + timeout)
+      debug.log("Node Timeout reset to " + timeout)
       this.timer = setTimeout(this.triggerTimeout.bind(this), timeout );
     }
     else if( this.position == "candidate" ){
       timeout = this.getElectionTimeout()
-      console.log("Node Timeout reset to " + timeout)
+      debug.log("Node Timeout reset to " + timeout)
       this.timer = setTimeout(this.triggerTimeout.bind(this), timeout );
     }
     else {
@@ -102,14 +103,14 @@ class Node {
       this.candidateRequestVotes.push(
         this.sendRequestVote(i).then(()=>{
           positiveCount++
-          console.log( "Pos" + positiveCount )
+          debug.log( "Pos" + positiveCount )
           if( positiveCount >= majority ){
             this.cancelRequestVoteBroadcast()
             this.changePositionTo("leader")
           }
         }).catch(()=>{
           negativeCount++
-          console.log( "Neg " + negativeCount )
+          debug.log( "Neg " + negativeCount )
           if( negativeCount >= majority )
             this.cancelRequestVoteBroadcast()
         })
@@ -124,10 +125,10 @@ class Node {
       if( this.position == "leader" && newPos == "candidate" )
         throw new Error("A bug is detected");
 
-      console.log("Node change position from " + this.position +  " to " +newPos);
+      debug.log("Node change position from " + this.position +  " to " +newPos);
       this.resetTimer();
 
-      if( newPos == "follower" ){
+      if( this.position == "leader" && newPos == "follower" ){
         // pasti jd follower lagi
         // re init timeout
         for( let i = 0; i < this.childTimer.length; ++ i ){
@@ -165,7 +166,7 @@ class Node {
       this.position = newPos;
     }
     catch(err){
-      console.log(err)
+      debug.log(err)
     }
   }
 
@@ -192,6 +193,10 @@ class Node {
   }
 
   sendAppendLog( to ){
+    if( this.position != "leader" ){
+      debug.log("BUG : still sending after not a leader")
+      return;
+    }
     let appendEntriesRPC = new AppendEntriesRPC( this, to );
     let node = this;
 
@@ -203,8 +208,8 @@ class Node {
     }).then(function(response){
       let res = response;
 
-      console.log( appendEntriesRPC.entry)
-      console.log(res)
+      debug.log( appendEntriesRPC.entry)
+      debug.log(res)
       if( res.type == "negative" ){
         node.nextIndex[to] --; // move back and try again
       }
@@ -212,13 +217,13 @@ class Node {
         if( appendEntriesRPC.entry != null ){ // sending something
           node.matchIndex[to] = appendEntriesRPC.prevLogIndex + 1;
           node.nextIndex[to] = appendEntriesRPC.prevLogIndex + 2;
-          console.log("Follower #"+to+" success append for " + appendEntriesRPC.prevLogIndex+1)
+          debug.log("Follower #"+to+" success append for " + appendEntriesRPC.prevLogIndex+1)
           node.updateCommitIndex();
         }
       }
     }).catch(function(err){
       if(! err  )
-        console.log(err);
+        debug.log(err);
     }).finally(function(){
       node.childTimer[to] = setTimeout( node.sendAppendLog.bind(node, to), node.getHeartbeatTimeout() );
     });
@@ -238,14 +243,14 @@ class Node {
         this.state.currentTerm = response.term;
         this.writeState();
         this.changePositionTo("follower");
-        return ;
+        return Promise.reject();
       }
 
       if( response.type == "negative" )
         return Promise.reject()
       return Promise.resolve()
     }).catch(function(err){
-      console.log(err.message)
+      debug.log(err.message)
       return Promise.reject();
     })
   }
@@ -284,7 +289,7 @@ class Node {
       }
     }
     catch(err){
-      console.log( err.message )
+      debug.log( err.message )
       return Promise.reject(err);
     }
   }
@@ -341,7 +346,7 @@ class Node {
       }
     }
     catch(err){
-      console.log(err)
+      debug.log(err)
       return this.replyNegative(err.message)
     }
   }
@@ -405,9 +410,9 @@ class Node {
       votedFor : null,
       currentData : {} // state machine
     };
-    console.log(fileloc);
+    debug.log(fileloc);
     if( !fs.existsSync(fileloc) ){
-      console.log("Fail to read");
+      debug.log("Fail to read");
       return __default;
     }
 
@@ -416,7 +421,7 @@ class Node {
       return JSON.parse(data);
     }
     catch(err){
-      console.log("Fail to read");
+      debug.log("Fail to read");
       return __default;
     }
   }
