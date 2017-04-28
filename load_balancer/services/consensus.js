@@ -394,14 +394,22 @@ class Node {
   }
 
   writeState(){
-    const fileloc = this.config.storage_location;
-    if( fs.existsSync(fileloc) )
-      fs.unlinkSync( fileloc );
-    fs.writeFileSync( fileloc, JSON.stringify(this.state), 'utf8');
+    const fileloc = this.config.storage_location
+    const filelocWrite = fileloc + ".tmp"
+    if( fs.existsSync(filelocWrite) )
+      fs.unlinkSync(filelocWrite)
+
+    fs.writeFileSync( filelocWrite, JSON.stringify(this.state), 'utf8');
+
+    if( fs.existsSync(fileloc) ){
+      fs.unlinkSync(fileloc)
+      fs.renameSync(filelocWrite, fileloc)
+    }
   }
 
   readState(){
-    const fileloc = this.config.storage_location;
+    let fileloc = this.config.storage_location;
+    let filelocWrite = fileloc + ".tmp"
     const __default = {
       currentTerm : 1,
       logs : [{ logId : 0, data : {}, term : 0}], // starts with index 1
@@ -411,7 +419,13 @@ class Node {
       currentData : {} // state machine
     };
     debug.log(fileloc);
-    if( !fs.existsSync(fileloc) ){
+    debug.log(filelocWrite);
+    let tmpExist = fs.existsSync(filelocWrite)
+    let stateExist = fs.existsSync(fileloc)
+    if( tmpExist && !stateExist )
+      fileloc = filelocWrite // when exiting renaming is not completed yet
+
+    if( !tmpExist && !stateExist ){
       debug.log("Fail to read");
       return __default;
     }
@@ -421,7 +435,7 @@ class Node {
       return JSON.parse(data);
     }
     catch(err){
-      debug.log("Fail to read");
+      debug.log("Format Err Fail to read");
       return __default;
     }
   }
