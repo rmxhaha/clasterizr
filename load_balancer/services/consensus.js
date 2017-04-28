@@ -35,6 +35,7 @@ class Node {
     this.childTimer = []
 
     this.changePositionTo("follower")
+    this.changePositionTo("candidate")
   }
 
   // -- timeout related
@@ -49,7 +50,7 @@ class Node {
   }
 
   getElectionTimeout(){
-    return this.config.load_balancer_timeout_max * 10;
+    return this.config.load_balancer_timeout_max * 5;
   }
 
   resetTimer(){
@@ -156,6 +157,7 @@ class Node {
 
       if( newPos == "candidate" ){
         this.state.currentTerm ++;
+        this.state.votedFor = this.nodeId
         // broadcast asking for an election
         this.broadcastRequestVote()
       }
@@ -268,8 +270,12 @@ class Node {
         let maxLogIndexReceived = this.state.logs.length-1;
 
         // This node have more log than you, so you can't be leader
-        if( maxLogIndexReceived > requestVoteRPC.lastLogIndex )
+        if( maxLogIndexReceived > requestVoteRPC.lastLogIndex ){
+          this.state.currentTerm = requestVoteRPC.term
+          this.state.votedFor = null // ????
+          this.changePositionTo("follower");
           return this.replyNegative("candidate log is not at least update with this node log");
+        }
 
         this.state.votedFor = requestVoteRPC.candidateId
         this.state.currentTerm = requestVoteRPC.term
