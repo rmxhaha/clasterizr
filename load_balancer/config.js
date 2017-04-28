@@ -2,7 +2,9 @@ module.exports = {
   "node_addresses" : [
     "http://localhost:47001",
     "http://localhost:47002",
-    "http://localhost:47003"
+    "http://localhost:47003",
+    "http://localhost:47004",
+    "http://localhost:47005"
   ],
   "worker_count" : 5,
   "load_balancer_timeout_min" : 150,
