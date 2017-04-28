@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 from http.server import HTTPServer
 from http.server import BaseHTTPRequestHandler
-
-PORT = 13337
+import os
+PORT = int( os.environ['PORT'] )
 
 class WorkerHandler(BaseHTTPRequestHandler):
     def prime(self, n):
