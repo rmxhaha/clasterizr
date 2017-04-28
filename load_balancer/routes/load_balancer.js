@@ -70,5 +70,24 @@ router.get('/receiveNewLog/:workerId/', function(req, res, next) {
 
 router.get('/receiveNewLog/:workerId/', function(req, res, next) {
 })
+router.get('/getWorkerData/', function(req, res, next) {
+  return res.json(myNode.state.currentData)
+})
+router.get('/getLogs/', function(req, res, next) {
+  return res.json(myNode.state.logs)
+})
+router.get('/getAllState/', function(req, res, next) {
+  return res.json(myNode.state)
+})
+router.get('/getLeaderData/', function(req, res, next) {
+  return res.json({
+    nextIndex : myNode.nextIndex,
+    matchIndex : myNode.matchIndex
+  })
+})
+router.get('/getAllState/', function(req, res, next) {
+  return res.json(myNode.state)
+})
+
 
 module.exports = router;
